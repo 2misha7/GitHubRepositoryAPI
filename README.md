@@ -1,5 +1,4 @@
 ﻿# GitHubRepositoryAPI
-# GitHub Repo API
 
 This project provides a RESTful API to fetch information about GitHub repositories,which are not forks for a specified user, including details about branches and their latest commits.
 
