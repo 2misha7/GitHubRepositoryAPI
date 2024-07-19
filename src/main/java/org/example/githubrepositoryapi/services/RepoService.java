@@ -4,12 +4,14 @@ import org.example.githubrepositoryapi.models.AllRepositoriesDTO;
 import org.example.githubrepositoryapi.models.BranchDTO;
 import org.example.githubrepositoryapi.models.RepositoryDTO;
 import org.json.JSONArray;
-import org.json.JSONException;
 import org.json.JSONObject;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
-
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,55 +19,70 @@ import java.util.List;
 @Service
 public class RepoService {
     private final RestTemplate restTemplate = new RestTemplate();
-    public AllRepositoriesDTO getAllRepositoriesByUser(String username) throws UserNotFoundException, IOException, JSONException {
-
-
+    public AllRepositoriesDTO getAllRepositoriesByUser(String username, String authorizationToken) throws UserNotFoundException{
 
         AllRepositoriesDTO repositoriesDTO = new AllRepositoriesDTO();
         String url = "https://api.github.com/users/" + username + "/repos";
-        String response = restTemplate.getForObject(url, String.class);
-
-        JSONArray arr = new JSONArray(response);
-        //System.out.println(arr);
-
-        List<RepositoryDTO> allRepositories = new ArrayList<>();
-        for(int i = 0 ; i < arr.length(); i++)
-        {
-            List<BranchDTO> allBranches = new ArrayList<>();
-            JSONObject a = arr.getJSONObject(i);
-            System.out.println(a.getBoolean("fork"));
-            String name = a.getString("name");
-
-
-            String branchesUrl = a.getString("branches_url").replace("{/branch}", "");
-            response = restTemplate.getForObject(branchesUrl, String.class);
-
-            JSONArray branchesArr = new JSONArray(response);
-            for(int j = 0; j < branchesArr.length(); j++){
-                JSONObject oneBranch = branchesArr.getJSONObject(j);
-                BranchDTO branchDTO = new BranchDTO();
-                branchDTO.setName(oneBranch.getString("name"));
-                JSONObject commit = oneBranch.getJSONObject("commit");
-                branchDTO.setLastCommitSHA(commit.getString("sha"));
-                allBranches.add(branchDTO);
-            }
-
-
-
-            JSONObject owner = a.getJSONObject("owner");
-
-            String ownerName = owner.getString("login");
-
-            RepositoryDTO r = new RepositoryDTO();
-            r.setRepositoryName(name);
-            r.setOwnerLogin(ownerName);
-            r.setBranches(allBranches);
-
-            allRepositories.add(r);
+        
+        HttpHeaders headers = new HttpHeaders();
+        if(authorizationToken != null){
+            headers.set("Authorization", "token " + authorizationToken);
         }
 
-        repositoriesDTO.setRepositories(allRepositories);
-        return repositoriesDTO;
-        //throw new UserNotFoundException();
+        try {
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<String> repoResponseEntity = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            
+            String response =  repoResponseEntity.getBody();
+            
+            JSONArray allRepoData = new JSONArray(response);
+            List<RepositoryDTO> allRepositories = new ArrayList<>();
+            //iterating over all repositories to get info about them
+            for (int i = 0; i < allRepoData.length(); i++) {
+                
+                JSONObject oneRepo = allRepoData.getJSONObject(i);
+                boolean isFork = oneRepo.getBoolean("fork");
+                if (isFork) {
+                    continue;
+                }
+                String name = oneRepo.getString("name");
+                String branchesUrl = oneRepo.getString("branches_url").replace("{/branch}", "");
+
+                //getting data about branches of this repo
+                ResponseEntity<String> branchesResponseEntity = restTemplate.exchange(branchesUrl, HttpMethod.GET, entity, String.class);
+                response = branchesResponseEntity.getBody();
+
+                List<BranchDTO> allBranches = getBranchDTOs(response);
+
+                JSONObject owner = oneRepo.getJSONObject("owner");
+                String ownerName = owner.getString("login");
+
+
+                RepositoryDTO repo = new RepositoryDTO();
+                repo.setRepositoryName(name);
+                repo.setOwnerLogin(ownerName);
+                repo.setBranches(allBranches);
+                allRepositories.add(repo);
+            }
+            repositoriesDTO.setRepositories(allRepositories);
+            return repositoriesDTO;
+        }catch (HttpClientErrorException.NotFound e){
+            throw new UserNotFoundException();
+        }
+    }
+
+    private static List<BranchDTO> getBranchDTOs(String response) {
+        JSONArray branchesArr = new JSONArray(response);
+        List<BranchDTO> allBranches = new ArrayList<>();
+        for (int j = 0; j < branchesArr.length(); j++) {
+            JSONObject oneBranch = branchesArr.getJSONObject(j);
+            BranchDTO branchDTO = new BranchDTO();
+            branchDTO.setName(oneBranch.getString("name"));
+            JSONObject commit = oneBranch.getJSONObject("commit");
+            branchDTO.setLastCommitSHA(commit.getString("sha"));
+            allBranches.add(branchDTO);
+        }
+        return allBranches;
     }
 }
